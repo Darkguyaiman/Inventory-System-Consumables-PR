@@ -1,0 +1,254 @@
+function checkStockDiscrepancies() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  
+
+  const stockOutSheet = ss.getSheetByName("Stock Out");
+  if (!stockOutSheet) {
+    console.log("ERROR: 'Stock Out' sheet not found!");
+    return;
+  }
+  
+
+  const stockInSheet = ss.getSheetByName("StockIn&Return");
+  if (!stockInSheet) {
+    console.log("ERROR: 'StockIn&Return' sheet not found!");
+    return;
+  }
+  
+
+  const stockOutLastRow = stockOutSheet.getLastRow();
+  if (stockOutLastRow < 4) {
+    console.log("No data found in Stock Out sheet (F4:F).");
+    return;
+  }
+  const stockOutValues = stockOutSheet
+    .getRange("F4:F" + stockOutLastRow)
+    .getValues()
+    .flat()
+    .filter(v => v !== "" && v !== null);
+  
+
+  const stockInLastRow = stockInSheet.getLastRow();
+  const stockInGValues = stockInLastRow >= 4
+    ? stockInSheet.getRange("G4:G" + stockInLastRow).getValues().flat()
+    : [];
+
+
+  const stockInDValues = stockInLastRow >= 4
+    ? stockInSheet.getRange("D4:D" + stockInLastRow).getValues().flat()
+    : [];
+
+
+  const stockInSet = new Set();
+  for (let i = 0; i < stockInGValues.length; i++) {
+    const gVal = stockInGValues[i];
+    const dVal = stockInDValues[i];
+    if (gVal !== "" && gVal !== null && String(dVal).trim() === "Stock In") {
+      stockInSet.add(String(gVal).trim());
+    }
+  }
+
+
+  console.log("=== Stock Out items NOT found in StockIn&Return (with D = 'Stock In') ===");
+  let discrepancyCount = 0;
+
+  for (const item of stockOutValues) {
+    if (!stockInSet.has(String(item).trim())) {
+      console.log(`Missing in StockIn&Return: "${item}"`);
+      discrepancyCount++;
+    }
+  }
+
+  if (discrepancyCount === 0) {
+    console.log(" All Stock Out items are accounted for in StockIn&Return.");
+  } else {
+    console.log(`\n Total discrepancies found: ${discrepancyCount}`);
+  }
+}
+
+
+function checkReturnBeforeStockIn() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+
+  const stockInSheet = ss.getSheetByName("StockIn&Return");
+  if (!stockInSheet) {
+    console.log("ERROR: 'StockIn&Return' sheet not found!");
+    return;
+  }
+
+  const lastRow = stockInSheet.getLastRow();
+  if (lastRow < 4) {
+    console.log("No data found in StockIn&Return sheet.");
+    return;
+  }
+
+
+  const dValues = stockInSheet.getRange("D4:D" + lastRow).getValues().flat();
+  const gValues = stockInSheet.getRange("G4:G" + lastRow).getValues().flat();
+
+
+
+  const skuState = {};
+  const flaggedSkus = []; 
+
+  for (let i = 0; i < gValues.length; i++) {
+    const sku = String(gValues[i]).trim();
+    const type = String(dValues[i]).trim();
+    const row = i + 4; 
+
+    if (sku === "" || type === "") continue;
+
+    if (!skuState[sku]) {
+      skuState[sku] = { seenStockIn: false, flagged: false };
+    }
+
+    if (type === "Stock In") {
+      skuState[sku].seenStockIn = true;
+    } else if (type === "Return") {
+      if (!skuState[sku].seenStockIn && !skuState[sku].flagged) {
+        flaggedSkus.push({ sku, row });
+        skuState[sku].flagged = true; 
+      }
+    }
+  }
+
+
+  console.log("=== SKUs with a Return BEFORE any Stock In ===");
+  if (flaggedSkus.length === 0) {
+    console.log("✅ No issues found. All Returns are preceded by a Stock In.");
+  } else {
+    for (const entry of flaggedSkus) {
+      console.log(`⚠️ SKU: "${entry.sku}" — first Return appears at row ${entry.row} before any Stock In`);
+    }
+    console.log(`\nTotal problematic SKUs: ${flaggedSkus.length}`);
+  }
+}
+
+
+
+function checkStockMismatch() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+
+  const stockOutSheet = ss.getSheetByName("Stock Out");
+  const stockInSheet = ss.getSheetByName("StockIn&Return");
+
+
+  let logSheet = ss.getSheetByName("Mismatch Log");
+  if (logSheet) ss.deleteSheet(logSheet);
+  logSheet = ss.insertSheet("Mismatch Log");
+  logSheet.appendRow(["SKU", "Stock Out Person", "Stock In Person"]);
+
+  const stockOutData = stockOutSheet.getRange(4, 1, stockOutSheet.getLastRow() - 3, 6).getValues();
+  const stockInData = stockInSheet.getRange(4, 1, stockInSheet.getLastRow() - 3, 7).getValues();
+
+  const stockInMap = {};
+
+
+  for (let i = 0; i < stockInData.length; i++) {
+    const row = stockInData[i];
+
+    const person = row[2];   
+    const type = row[3];     
+    const category = row[4]; 
+    const sku = row[6];      
+
+    if (!sku) continue;
+
+    if (type === "Stock In" && category === "No Allocation Bag") {
+      stockInMap[sku] = person;
+    }
+  }
+
+  const mismatches = [];
+
+
+  for (let i = 0; i < stockOutData.length; i++) {
+    const row = stockOutData[i];
+
+    const personOut = row[2]; 
+    const type = row[3];      
+    const sku = row[5];       
+
+    if (!sku) continue;
+
+    if (type === "No Allocation Bag") {
+      const personIn = stockInMap[sku];
+
+      if (personIn && personIn !== personOut) {
+        mismatches.push([sku, personOut, personIn]);
+      }
+    }
+  }
+
+  if (mismatches.length > 0) {
+    logSheet.getRange(2, 1, mismatches.length, 3).setValues(mismatches);
+  }
+
+  Logger.log(`Clinician mismatch: ${mismatches.length}`);
+}
+
+
+function checkAllocationBagMismatch() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+
+  const stockOutSheet = ss.getSheetByName("Stock Out");
+  const stockInSheet = ss.getSheetByName("StockIn&Return");
+
+  let logSheet = ss.getSheetByName("Allocation Bag Mismatch");
+  if (logSheet) ss.deleteSheet(logSheet);
+  logSheet = ss.insertSheet("Allocation Bag Mismatch");
+  logSheet.appendRow(["SKU", "Stock Out Bag", "Stock In Bag"]);
+
+  const stockOutData = stockOutSheet.getRange(4, 1, stockOutSheet.getLastRow() - 3, 6).getValues();
+  const stockInData = stockInSheet.getRange(4, 1, stockInSheet.getLastRow() - 3, 7).getValues();
+
+  const stockInMap = {};
+
+
+  for (let i = 0; i < stockInData.length; i++) {
+    const row = stockInData[i];
+
+    const type = row[3]; 
+    const bag = row[4];  
+    const sku = row[6];  
+
+    if (!sku) continue;
+
+    if (type === "Stock In" && bag !== "No Allocation Bag") {
+      stockInMap[sku] = bag;
+    }
+  }
+
+  const mismatches = [];
+
+
+  for (let i = 0; i < stockOutData.length; i++) {
+    const row = stockOutData[i];
+
+    const bagOut = row[3]; 
+    const sku = row[5];    
+
+    if (!sku) continue;
+
+    if (bagOut !== "No Allocation Bag") {
+      const bagIn = stockInMap[sku];
+
+      if (bagIn && bagIn !== bagOut) {
+        mismatches.push([sku, bagOut, bagIn]);
+      }
+    }
+  }
+
+  if (mismatches.length > 0) {
+    logSheet.getRange(2, 1, mismatches.length, 3).setValues(mismatches);
+  }
+
+  Logger.log(`Allocation mismatch: ${mismatches.length}`);
+}
+
+
+function runAllMismatchChecks() {
+  checkStockMismatch();
+  checkAllocationBagMismatch();
+  Logger.log("All mismatch checks completed");
+}
