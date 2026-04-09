@@ -40,6 +40,85 @@ function generateDetailedSheets() {
   });
 }
 
+function generateCompanySheets() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const PREFIX = "COM - ";
+
+  ss.getSheets().forEach(sheet => {
+    if (sheet.getName().startsWith(PREFIX)) ss.deleteSheet(sheet);
+  });
+
+  const restockSheet = ss.getSheetByName("Restock");
+  const stockInSheet = ss.getSheetByName("StockIn&Return");
+  const outrightSheet = ss.getSheetByName("Outright Purchase");
+  const stockOutSheet = ss.getSheetByName("Stock Out");
+
+  const restockLastRow = restockSheet.getLastRow();
+  const stockInLastRow = stockInSheet.getLastRow();
+  const outrightLastRow = outrightSheet.getLastRow();
+  const stockOutLastRow = stockOutSheet.getLastRow();
+
+  const restockData = restockLastRow >= 4
+    ? restockSheet.getRange(4, 1, restockLastRow - 3, 12).getValues()
+    : [];
+  const stockInData = stockInLastRow >= 4
+    ? stockInSheet.getRange(4, 1, stockInLastRow - 3, 11).getValues()
+    : [];
+  const outrightData = outrightLastRow >= 4
+    ? outrightSheet.getRange(4, 1, outrightLastRow - 3, 16).getValues()
+    : [];
+  const stockOutData = stockOutLastRow >= 4
+    ? stockOutSheet.getRange(4, 1, stockOutLastRow - 3, 20).getValues()
+    : [];
+
+  const companySummary = {};
+
+  function addToSummary(company, item, delta) {
+    if (!company || !item) return;
+    if (!companySummary[company]) companySummary[company] = {};
+    companySummary[company][item] = (companySummary[company][item] || 0) + delta;
+  }
+
+  restockData.forEach(row => {
+    const company = row[11];
+    const item = row[2];
+    if (!company || !item) return;
+    addToSummary(company, item, 1);
+  });
+
+  stockInData.forEach(row => {
+    const item = row[9];
+    const company = row[10];
+    const reason = row[3];
+    if (!company || !item || !reason) return;
+    if (reason === "Stock In") addToSummary(company, item, -1);
+    else if (reason === "Returned") addToSummary(company, item, 1);
+  });
+
+  outrightData.forEach(row => {
+    const reason = row[4];
+    const item = row[14];
+    const company = row[15];
+    if (!company || !item || !reason) return;
+    if (reason === "Sold") addToSummary(company, item, -1);
+    else if (reason === "Returned") addToSummary(company, item, 1);
+  });
+
+  stockOutData.forEach(row => {
+    const company = row[19];
+    const item = row[18];
+    if (!company || !item) return;
+    addToSummary(company, item, -1);
+  });
+
+  Object.keys(companySummary).forEach(company => {
+    const sheet = ss.insertSheet(PREFIX + company.toString().substring(0, 90));
+
+    const summaryOutput = [["Item", "Total"], ...Object.entries(companySummary[company])];
+    sheet.getRange(1, 1, summaryOutput.length, 2).setValues(summaryOutput);
+  });
+}
+
 /*
 function generateDetailedSheets() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
