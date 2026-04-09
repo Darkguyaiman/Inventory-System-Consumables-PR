@@ -19,9 +19,11 @@ function generateDetailedSheets() {
     const holder = allocation === "No Allocation Bag" ? person : allocation;
     if (!holder) return;
 
-    (resultLogs[holder] ||= []).push([sku, item, action]);
-    const summary = (resultSummary[holder] ||= {});
-    summary[item] = (summary[item] || 0) + (action === "Stock In" ? 1 : -1);
+    if (!resultLogs[holder]) resultLogs[holder] = [];
+    if (!resultSummary[holder]) resultSummary[holder] = {};
+
+    resultLogs[holder].push([sku, item, action]);
+    resultSummary[holder][item] = (resultSummary[holder][item] || 0) + (action === "Stock In" ? 1 : -1);
   }
 
   stockInData.forEach(row => processRow(row[6], row[9], row[2], row[4], row[3]));
@@ -126,5 +128,4 @@ function generateDetailedSheets() {
     sheet.getRange(1, 5, summaryOutput.length, 2).setValues(summaryOutput);
   });
 }
-
 */
